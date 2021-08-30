@@ -6,11 +6,11 @@ cabal-version: 1.12
 --
 -- hash: 5e1d01c0a7ee38fd7b42f1e3a5c9a457d66718aa734de4452f6e37f91f35df2f
 
-name:           aaes
+name:           AAES
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/aaes#readme>
-homepage:       https://github.com/githubuser/aaes#readme
-bug-reports:    https://github.com/githubuser/aaes/issues
+description:    Please see the README on GitHub at <https://github.com/githubuser/AAES#readme>
+homepage:       https://github.com/githubuser/AAES#readme
+bug-reports:    https://github.com/githubuser/AAES/issues
 author:         Author name here
 maintainer:     example@example.com
 copyright:      2021 Author name here
@@ -23,13 +23,13 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/aaes
+  location: https://github.com/githubuser/AAES
 
 library
   exposed-modules:
-      aaes
+      AAES
   other-modules:
-      Paths_aaes
+      Paths_AAES
   hs-source-dirs:
       src
   build-depends:
@@ -38,30 +38,30 @@ library
     , haskell-quaternion
   default-language: Haskell2010
 
-executable aaes-exe
+executable AAES-exe
   main-is: Main.hs
   other-modules:
-      Paths_aaes
+      Paths_AAES
   hs-source-dirs:
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aaes
+      AAES
     , base >=4.7 && <5
     , forsyde-shallow
     , haskell-quaternion
   default-language: Haskell2010
 
-test-suite aaes-test
+test-suite AAES-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      Paths_aaes
+      Paths_AAES
   hs-source-dirs:
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aaes
+      AAES
     , base >=4.7 && <5
     , forsyde-shallow
     , haskell-quaternion

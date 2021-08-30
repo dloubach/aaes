@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module  :  FMS
+-- Module  :  AAES
 -- Copyright   :  (c) Ricardo Bonna
 -- License     :  BSD-3
 --
@@ -11,7 +11,7 @@
 --
 -----------------------------------------------------------------------------
 
-module FMS (
+module AAES (
   inertialIntegrator, euler, a_out, v_out, p_out, nzBody
   ) where
 
