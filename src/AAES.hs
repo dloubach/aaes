@@ -12,7 +12,7 @@
 -----------------------------------------------------------------------------
 
 module AAES (
-  inertialIntegrator, euler, a_out, v_out, p_out, nzBody
+  inertialIntegrator, euler, a_out, v_out, p_out, nzBody, aaesPN, sy
   ) where
 
 import ForSyDe.Shallow
@@ -148,9 +148,9 @@ f :: Float  -- ^ Sampling period
   -> Float  -- ^ threshold for the voter of w
   -> Float  -- ^ threshold for the voter of a
   -> AbstExt [Quaternion Float] -- ^ Current state x[k] = [wv, av, q, a, v, p]
-  -> AbstExt [ImuVal]   -- ^ List with the outputs from the three IMUs as pairs (w, a)
+  -> AbstExt (ImuVal, ImuVal, ImuVal)   -- ^ Outputs from the three IMUs as pairs (w, a)
   -> AbstExt [Quaternion Float] -- ^ Next state x[k+1]
-f ts ths_w ths_a (Prst [wv', av', q', a', v', p']) (Prst [(w0', a0'), (w1', a1'), (w2', a2')]) 
+f ts ths_w ths_a (Prst [wv', av', q', a', v', p']) (Prst ((w0', a0'), (w1', a1'), (w2', a2'))) 
   = Prst [wv, av, q, a, v, p]
   where (w0, w1, w2) = (from3tupleQ w0', from3tupleQ w1', from3tupleQ w2')
         (a0, a1, a2) = (from3tupleQ a0', from3tupleQ a1', from3tupleQ a2')
@@ -166,10 +166,10 @@ g :: Float  -- ^ Sampling period
   -> Float  -- ^ threshold for the voter of w
   -> Float  -- ^ threshold for the voter of a
   -> AbstExt [Quaternion Float] -- ^ Current state x[k] = [wv, av, q, a, v, p]
-  -> AbstExt [ImuVal]   -- ^ List with the outputs from the three IMUs as pairs (w, a)
-  -> AbstExt ([Quaternion Float], [Vec])  -- ^ Outputs (x[k+1], y[k]) = [eulerAngs, aVec, vVec, pVec, nz]
-g ts ths_w ths_a (Prst [wv', av', q', a', v', p']) (Prst [(w0', a0'), (w1', a1'), (w2', a2')]) 
-  = Prst ([wv, av, q, a, v, p], [eulerAngs, aVec, vVec, pVec, nz])
+  -> AbstExt (ImuVal, ImuVal, ImuVal)   -- ^ Outputs from the three IMUs as pairs (w, a)
+  -> AbstExt [Vec]  -- ^ Output y[k] = [eulerAngs, aVec, vVec, pVec, nz]
+g ts ths_w ths_a (Prst [wv', av', q', a', v', p']) (Prst ((w0', a0'), (w1', a1'), (w2', a2'))) 
+  = Prst [eulerAngs, aVec, vVec, pVec, nz]
   where (w0, w1, w2) = (from3tupleQ w0', from3tupleQ w1', from3tupleQ w2')
         (a0, a1, a2) = (from3tupleQ a0', from3tupleQ a1', from3tupleQ a2')
         wv = voter ths_w w0 w1 w2 wv'
@@ -186,7 +186,130 @@ g ts ths_w ths_a (Prst [wv', av', q', a', v', p']) (Prst [(w0', a0'), (w1', a1')
 g _ _ _ _ _ = Abst
 
 
-config :: (AbstExt [Quaternion Float] -> AbstExt [ImuVal] -> AbstExt [Quaternion Float],
- AbstExt [Quaternion Float] -> AbstExt [ImuVal] -> AbstExt ([Quaternion Float], [Vec]),
- Integer)
-config = (f 0.01 0.1 0.1, g 0.01 0.1 0.1, 10)
+fAAES = f 0.01 0.1 0.1
+gAAES = g 0.01 0.1 0.1
+
+fDummy :: AbstExt [Quaternion Float] -- ^ Current state x[k] = [wv, av, q, a, v, p]
+       -> AbstExt (ImuVal, ImuVal, ImuVal)   -- ^ Outputs from the three IMUs as pairs (w, a)
+       -> AbstExt [Quaternion Float]  -- ^ Output y[k] = [eulerAngs, aVec, vVec, pVec, nz]
+fDummy _ _ = Abst
+
+gDummy :: AbstExt [Quaternion Float] -- ^ Current state x[k] = [wv, av, q, a, v, p]
+       -> AbstExt (ImuVal, ImuVal, ImuVal)   -- ^ Outputs from the three IMUs as pairs (w, a)
+       -> AbstExt [Vec]  -- ^ Output y[k] = [eulerAngs, aVec, vVec, pVec, nz]
+gDummy _ _ = Abst
+
+initQuat = fromListQ [0, 0, 0, 0]
+
+initState = Prst (replicate 6 initQuat)
+
+config :: (AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Quaternion Float], AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Vec], Int)
+config = (fAAES, gAAES, 2)
+
+
+-- AAES voter block
+aaesVoterFunc :: (Eq y) => ((AbstExt y, AbstExt x), (AbstExt y, AbstExt x), (AbstExt y, AbstExt x)) -> (y, AbstExt x, AbstExt Int)
+aaesVoterFunc ((Prst y1, Prst x1), (Prst y2, Prst x2), (Prst y3, Prst x3))
+  | y1 == y2 && y2 == y3 = (y1, Prst x1, Abst)
+  | y1 /= y2 && y2 == y3 = (y2, Prst x2, Prst 1)
+  | y1 /= y2 && y1 == y3 = (y1, Prst x1, Prst 2)
+  | y1 == y2 && y2 /= y3 = (y1, Prst x1, Prst 3)
+aaesVoterFunc ((Abst, _), (Prst y2, Prst x2), (Prst y3, Prst x3)) = (y2, Prst x2, Prst 1)
+aaesVoterFunc ((Prst y1, Prst x1), (Abst, _), (Prst y3, Prst x3)) = (y1, Prst x1, Prst 2)
+aaesVoterFunc ((Prst y1, Prst x1), (Prst y2, Prst x2), (Abst, _)) = (y1, Prst x1, Prst 3)
+aaesVoterFunc _ = error "aaesVoterFunc: Condition not valid"
+
+aaesVoter :: (Eq y) => Signal ((AbstExt y, AbstExt x), (AbstExt y, AbstExt x), (AbstExt y, AbstExt x))
+          -> (Signal y, Signal (AbstExt x), Signal (AbstExt Int))
+aaesVoter inp = unzip3SY (combSY aaesVoterFunc inp)
+
+aaesMuxFunc :: a -> a -> a -> a -> (Int, Int, Int) -> (a, a, a)
+aaesMuxFunc i1 i2 i3 i4 (n1, n2, n3) = (o1, o2, o3)
+  where o1 = iList !! n1
+        o2 = iList !! n2
+        o3 = iList !! n3
+        iList = [i1, i2, i3, i4]
+
+aaesMux :: Signal a -> Signal a -> Signal a -> Signal a -> Signal (Int, Int, Int) -> Signal (a, a, a)
+aaesMux = comb5SY aaesMuxFunc
+
+zipWith5SY :: (a -> b -> c -> d -> e -> f) -> Signal a -> Signal b
+    -> Signal c -> Signal d -> Signal e -> Signal f
+zipWith5SY _ NullS   _   _   _   _  = NullS
+zipWith5SY _ _   NullS   _   _   _  = NullS
+zipWith5SY _ _   _   NullS   _   _  = NullS
+zipWith5SY _ _   _   _   NullS   _  = NullS
+zipWith5SY _ _   _   _   _   NullS  = NullS
+zipWith5SY f (v:-vs) (w:-ws) (x:-xs) (y:-ys) (z:-zs) 
+  = f v w x y z :- zipWith5SY f vs ws xs ys zs
+    
+comb5SY :: (a -> b -> c -> d -> e -> f) -> Signal a -> Signal b
+    -> Signal c -> Signal d -> Signal e -> Signal f
+comb5SY = zipWith5SY
+
+
+ctrlDevLogic :: (AbstExt x -> AbstExt s_in -> AbstExt x, AbstExt x -> AbstExt s_in -> AbstExt y, Int)
+             -> AbstExt Int -> Int -> (Int, Int, Int) -> ((Int, Int, Int), Int,
+             (AbstExt (AbstExt x -> AbstExt s_in -> AbstExt x, AbstExt x -> AbstExt s_in -> AbstExt y, Int),
+              AbstExt (AbstExt x -> AbstExt s_in -> AbstExt x, AbstExt x -> AbstExt s_in -> AbstExt y, Int),
+              AbstExt (AbstExt x -> AbstExt s_in -> AbstExt x, AbstExt x -> AbstExt s_in -> AbstExt y, Int),
+              AbstExt (AbstExt x -> AbstExt s_in -> AbstExt x, AbstExt x -> AbstExt s_in -> AbstExt y, Int)))
+ctrlDevLogic _ Abst m cv
+    | m > 0 = (cv, m-1, list4tuple (replicate n Abst))
+    | otherwise = (cv, 0, list4tuple (replicate n Abst))
+    where n = 4
+ctrlDevLogic (f,g,m') (Prst r) m (a,b,c)
+    | m > 0 = ((a,b,c), m-1, list4tuple (replicate n Abst))
+    | r == a = ((d,b,c), m', list4tuple (func n (d-1) (Prst (f,g,m')) Abst))
+    | r == b = ((a,d,c), m', list4tuple (func n (d-1) (Prst (f,g,m')) Abst))
+    | r == c = ((a,b,d), m', list4tuple (func n (d-1) (Prst (f,g,m')) Abst))
+    | otherwise = error "ctrlDevLogic: Unmatched pattern"
+    where d = max (max a b) c + 1
+          n = 4
+
+func :: Int -> Int -> a -> a -> [a]
+func 0 _ _ _ = []
+func n 0 a1 a2 = a1 : replicate (n-1) a2
+func n k a1 a2 = a2 : func (n-1) (k-1) a1 a2
+
+list4tuple :: [a] -> (a,a,a,a)
+list4tuple [a,b,c,d] = (a,b,c,d)
+list4tuple _ = error "list4tuple: Input list with wrong lentgh"
+
+ctrlDev :: Signal (AbstExt Int) -> (Signal (Int, Int, Int),
+        (Signal (AbstExt (AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Quaternion Float], AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Vec], Int)),
+         Signal (AbstExt (AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Quaternion Float], AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Vec], Int)),
+         Signal (AbstExt (AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Quaternion Float], AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Vec], Int)),
+         Signal (AbstExt (AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Quaternion Float], AbstExt [Quaternion Float] -> AbstExt (ImuVal, ImuVal, ImuVal) -> AbstExt [Vec], Int))))
+ctrlDev r = (cv, cts)
+    where (cv, m, ct) = unzip3SY $ comb3SY (ctrlDevLogic config) r m' cv'
+          cts = unzip4SY ct
+          m' = delaySY 0 m
+          cv' = delaySY (0,1,2) cv
+          
+
+-- Intantiation of AAES system elements
+
+aaesCore = rtrp (fAAES, gAAES, 0, initState)
+aaesCoreSpare = rtrp (fDummy, gDummy, 0, initState)
+
+aaesPN :: Signal (AbstExt (ImuVal, ImuVal, ImuVal)) -> Signal [Vec]
+aaesPN inp = sy
+  where (sy, sx, faultyCore) = aaesVoter sa
+        sa = aaesMux core0out core1out core2out core3out sSel
+        core0out = aaesCore ct0 inp currState
+        core1out = aaesCore ct1 inp currState
+        core2out = aaesCore ct2 inp currState
+        core3out = aaesCoreSpare ct3 inp currState
+        currState = delaySY initState sx
+        (sSel', (ct0', ct1', ct2', ct3')) = ctrlDev faultyCore
+        sSel = delaySY (0,1,2) sSel'
+        ct0 = delaySY Abst ct0'
+        ct1 = delaySY Abst ct1'
+        ct2 = delaySY Abst ct2'
+        ct3 = delaySY Abst ct3'
+
+
+testInp :: Signal (AbstExt (ImuVal, ImuVal, ImuVal))
+testInp = signal (replicate 10 (Prst (((1,0,0),(1,0,0)), ((1,0,0),(1,0,0)), ((1,0,0),(1,0,0)))))
+sy = aaesPN testInp
